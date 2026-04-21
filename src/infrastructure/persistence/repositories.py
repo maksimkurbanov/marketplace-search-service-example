@@ -1,6 +1,8 @@
+from datetime import UTC, datetime
 from typing import List
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.ports.repositories import SearchRepository, SortKey
@@ -21,10 +23,23 @@ class SQLAlchemySearchRepository(SearchRepository):
         category: str,
         city: str,
     ) -> None:
-        raise NotImplementedError
+        upsert_data = locals()
+        del upsert_data["self"], upsert_data["ad_id"]
+        stmt = insert(SearchIndexModel).values(
+            **upsert_data, ad_id=ad_id, indexed_at=datetime.now(UTC)
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["ad_id"],
+            set_={
+                **upsert_data,
+                "indexed_at": datetime.now(UTC),
+            },
+        )
+        await self._session.execute(stmt)
 
     async def delete(self, ad_id: int) -> None:
-        raise NotImplementedError
+        stmt = delete(SearchIndexModel).where(SearchIndexModel.ad_id == ad_id)
+        await self._session.execute(stmt)
 
     async def search(
         self,
@@ -44,8 +59,12 @@ class SQLAlchemySearchRepository(SearchRepository):
         if query is not None and query.strip():
             tsquery = func.plainto_tsquery("russian", query)
             rank = func.ts_rank(SearchIndexModel.ts_vector, tsquery)
-            items_query = items_query.where(SearchIndexModel.ts_vector.op("@@")(tsquery)) # noqa: E501
-            count_query = count_query.where(SearchIndexModel.ts_vector.op("@@")(tsquery)) # noqa: E501
+            items_query = items_query.where(
+                SearchIndexModel.ts_vector.op("@@")(tsquery)
+            )  # noqa: E501
+            count_query = count_query.where(
+                SearchIndexModel.ts_vector.op("@@")(tsquery)
+            )  # noqa: E501
 
         if category is not None:
             items_query = items_query.where(SearchIndexModel.category == category)

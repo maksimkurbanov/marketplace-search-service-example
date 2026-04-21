@@ -10,9 +10,27 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "TODO: implement lint job"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check src/ bin/
+      - run: uv run ruff format --check src/ bin/
+      - run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "Ruff made changes. Please run 'ruff format' and 'ruff check --fix' locally and commit the changes."
+            git diff
+            exit 1
+          fi
 
   test:
+    needs: lint
     runs-on: ubuntu-latest
     steps:
-      - run: echo "TODO: implement test job"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run pytest tests/ -v
